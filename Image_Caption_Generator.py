@@ -16,7 +16,7 @@ def menu():
             menu()
 
 def randImage():
-    fileDir='.\\archive\\Images\\'
+    fileDir='.\\archive\\Images\\'#change here for archive directotry changes
     folderFiles=[f for f in os.listdir(fileDir) if os.path.isfile(os.path.join(fileDir, f))]#creates list of all files in folder
     randFile=rand.choice(folderFiles)
     imageDir=os.path.join(fileDir,randFile)
@@ -27,10 +27,11 @@ def randImage():
     menu()
 
 def upload():
-    #
     try:
         imageDir=input("\nCopy image directory here\n")
         caption=input("\nplease enter a descriptive sentence about the image\n")
+        print(caption)#takes image directory and makes the user input a caption about the image
+
         os.startfile(imageDir)
         modelSwitch(imageDir)
         menu()
@@ -42,9 +43,9 @@ def modelSwitch(imageDir):
     modelMenu=int(input("\ntype 1 for or type 2 for Blip\n"))#user can choose which model to use
     match modelMenu:
         case 1:
-            inception(imageDir)
+            inception(imageDir)#inception and blip for encode-decode(actual module path)
         case 2:
-            blip(imageDir)
+            blip(imageDir)#accurate for testing/ all in one model
         case _:
             menu()
 
@@ -73,31 +74,31 @@ def inception(imageDir):
     model.eval()
 
     image = Image.open(imageDir)
-    preprocess = transforms.Compose([
+    reSize = transforms.Compose([
     transforms.Resize(299), 
     transforms.CenterCrop(299),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # resizes to fit inceptionv3 requirements
     ])
     
-    inputTensor = preprocess(image)
-    inputBatch = inputTensor.unsqueeze(0)#correcting format
+    tensor = reSize(image)
+    unSqueezed = tensor.unsqueeze(0)#correcting format
 
     with torch.no_grad():
-        outputs = model(inputBatch)
+        outputs = model(unSqueezed)
 
-    probs = torch.nn.functional.softmax(outputs[0], dim=0) 
+    probability = torch.nn.functional.softmax(outputs[0], dim=0) 
     predictions = 3  #top 3 predictions
-    values, indices = torch.topk(probs, predictions)
+    indices = torch.topk(probability, predictions)
 
     _, predicted_class = torch.max(outputs, 1)
     LABELS_URL = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
-    labels = requests.get(LABELS_URL).json()
+    labelJson = requests.get(LABELS_URL).json()#returns a json string with probabilties of predictions
 
     captionWords=[]
     for i in range(predictions):
-        idx = indices[i].item()
-        label = labels[str(idx)][1]
+        index = indices[i].item()
+        label = labelJson[str(index)][1]
         captionWords.append(label)#saves top predictions to list
         
     decoderBlip(captionWords)
@@ -106,13 +107,13 @@ def decoderBlip(captionWords):
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
     model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")#setting up links for model
 
-    prompt=f"A scene with{', '.join(captionWords)}.Describe this scene:"#
-    dummy_image = Image.new("RGB", (224, 224), color="white")#fake image needed for blip
+    prompt=f"A scene with{', '.join(captionWords)}.Describe this scene:"
+    fakeImage = Image.new("RGB", (224, 224), color="white")#fake image needed for blip
 
-    inputs=processor(text=prompt,images=dummy_image,return_tensors="pt")
+    input=processor(text=prompt,images=fakeImage,return_tensors="pt")#needed inputs for model to work
 
     with torch.no_grad():
-        output = model.generate(**inputs,max_length=50,num_return_sequences=1)
+        output = model.generate(**input,max_length=50,num_return_sequences=1)
 
         caption=processor.decode(output[0],skip_special_tokens=True)
         descriptors=caption.split(':')

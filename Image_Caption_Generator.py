@@ -1,15 +1,17 @@
-import random as rand
-import os
+import os, torch, requests, random as rand
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
+from torchvision import models, transforms
 
 def menu():
-    mainMenu=int(input("type 1 for a random image or type 2 to enter a specific file location"))
+    mainMenu=int(input("\ntype 1 for a random image, type 2 to enter a specific file location or type 3 to exit\n"))
     match mainMenu:
         case 1:
             randImage()
         case 2:
             upload()
+        case 3:
+            quit()
         case _:
             menu()
 
@@ -18,23 +20,35 @@ def randImage():
     folderFiles=[f for f in os.listdir(fileDir) if os.path.isfile(os.path.join(fileDir, f))]#creates list of all files in folder
     randFile=rand.choice(folderFiles)
     imageDir=os.path.join(fileDir,randFile)
+
     os.startfile(imageDir)#opens file of random image
     captionCheck(randFile)
-    captionGenerator(imageDir)
+    modelSwitch(imageDir)
     menu()
 
 def upload():
+    #
     try:
-        imageDir=input("Copy image directory here")
-        caption=input("please enter a descriptive sentence about the image")
+        imageDir=input("\nCopy image directory here\n")
+        caption=input("\nplease enter a descriptive sentence about the image\n")
         os.startfile(imageDir)
-        captionGenerator(imageDir)
+        modelSwitch(imageDir)
         menu()
     except:
-        print("File cannot be found")
+        print("\nFile cannot be found")
         menu()
 
-def captionGenerator(imageDir):
+def modelSwitch(imageDir):
+    modelMenu=int(input("\ntype 1 for or type 2 for Blip\n"))#user can choose which model to use
+    match modelMenu:
+        case 1:
+            inception(imageDir)
+        case 2:
+            blip(imageDir)
+        case _:
+            menu()
+
+def blip(imageDir):
     processor= BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large")#loads pretrained Blip processor
     model=BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large")#loads blip model
 
@@ -51,5 +65,59 @@ def captionCheck(randFile):
             if randFile in line.strip():#checks for file name in caption file
                 caption=(line.strip()).replace((randFile+","),"")
                 caption=caption.replace(" .","")#removes all but caption from descriptive string
-    print(caption)
+    print("\n",caption,"\n")
+
+
+def inception(imageDir):
+    model = models.inception_v3(pretrained=True)#setting up model
+    model.eval()
+
+    image = Image.open(imageDir)
+    preprocess = transforms.Compose([
+    transforms.Resize(299), 
+    transforms.CenterCrop(299),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # resizes to fit inceptionv3 requirements
+    ])
+    
+    inputTensor = preprocess(image)
+    inputBatch = inputTensor.unsqueeze(0)#correcting format
+
+    with torch.no_grad():
+        outputs = model(inputBatch)
+
+    probs = torch.nn.functional.softmax(outputs[0], dim=0) 
+    predictions = 3  #top 3 predictions
+    values, indices = torch.topk(probs, predictions)
+
+    _, predicted_class = torch.max(outputs, 1)
+    LABELS_URL = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
+    labels = requests.get(LABELS_URL).json()
+
+    captionWords=[]
+    for i in range(predictions):
+        idx = indices[i].item()
+        label = labels[str(idx)][1]
+        captionWords.append(label)#saves top predictions to list
+        
+    decoderBlip(captionWords)
+
+def decoderBlip(captionWords): 
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")#setting up links for model
+
+    prompt=f"A scene with{', '.join(captionWords)}.Describe this scene:"#
+    dummy_image = Image.new("RGB", (224, 224), color="white")#fake image needed for blip
+
+    inputs=processor(text=prompt,images=dummy_image,return_tensors="pt")
+
+    with torch.no_grad():
+        output = model.generate(**inputs,max_length=50,num_return_sequences=1)
+
+        caption=processor.decode(output[0],skip_special_tokens=True)
+        descriptors=caption.split(':')
+        if descriptors[1]=="":#loops until returns no empty
+            decoderBlip(captionWords)
+        print("\n",caption,"\n")
+
 menu()
